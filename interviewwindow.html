@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Mock Interview</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f4f4f4;
+        }
+        #currentQuestion {
+            margin: 20px;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #fff;
+            width: 90%;
+            max-width: 600px;
+            text-align: center;
+            font-size: 1.2em;
+        }
+        #transcript {
+            margin-top: 20px;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #fff;
+            width: 90%;
+            max-width: 600px;
+            text-align: left;
+            font-size: 1em;
+            overflow-y: auto;
+            max-height: 200px;
+        }
+        .button-container {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 1em;
+            border: none;
+            border-radius: 5px;
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        /* Microphone animation */
+        #micIcon {
+            font-size: 50px;
+            color: #007bff;
+            display: none;
+            animation: pulse 1s infinite;
+        }
+
+        /* Pulse animation for the mic */
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.6; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+    </style>
+    <script>
+        let questions = [];
+        let currentIndex = 0;
+        let recognition;
+        let isRecording = false;
+        let transcript = '';
+        let answers = [];  // Array to store answers
+        let speechSynthesisUtterance;  // Global variable for speech synthesis
+
+        async function getQuestions() {
+            cancelSpeech(); // Stop any ongoing speech before starting new action
+            try {
+                const requestBody = {
+                    company: sessionStorage.getItem('company'),
+                    job_role: sessionStorage.getItem('job_role'),
+                    experience_lvl: sessionStorage.getItem('experience_lvl')
+                };
+                console.log('Request body:', requestBody);
+
+                const response = await fetch('http://127.0.0.1:5000/api/get-questions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Server error: ${response.status} - ${response.statusText}. Details: ${errorText}`);
+                }
+
+                const data = await response.json();
+                console.log('Received Questions:', data.qtns);
+
+                if (!data.qtns || !Array.isArray(data.qtns)) {
+                    throw new Error('Invalid response format from server');
+                }
+
+                questions = data.qtns;
+                currentIndex = 0;
+                displayQuestion();
+            } catch (error) {
+                console.error('Error fetching questions:', error);
+                document.getElementById('currentQuestion').textContent = `Error: ${error.message}. Please try again.`;
+            }
+        }
+
+        function displayQuestion() {
+            cancelSpeech(); // Stop any ongoing speech before showing a new question
+            if (currentIndex < questions.length) {
+                const question = questions[currentIndex];
+                document.getElementById('currentQuestion').textContent = question;
+                clearTranscript();  // Clear transcript when a new question is shown
+                readQuestionAloud(question);
+            } else {
+                document.getElementById('currentQuestion').textContent = 'No more questions available!';
+                toggleFinishButton(true); // Enable the Finish Interview button when all questions are done
+            }
+        }
+
+        function nextQuestion() {
+            cancelSpeech(); // Stop any ongoing speech before moving to the next question
+            if (transcript.trim() !== "") { // Ensure there is an answer before moving
+                // Store the previous answer before moving to the next question
+                answers.push(transcript.trim());
+                console.log("Stored Answer:", transcript); // You can log answers if needed
+
+                // Move to next question
+                if (currentIndex < questions.length - 1) {
+                    currentIndex++;
+                    displayQuestion();
+                } else {
+                    document.getElementById('currentQuestion').textContent = 'You have reached the end of the questions!';
+                }
+
+                // Clear transcript for next question
+                clearTranscript();
+                toggleNextButton(false); // Disable next button until user speaks
+            } else {
+                alert("Please provide an answer before moving to the next question.");
+            }
+        }
+
+        function readQuestionAloud(question) {
+            cancelSpeech(); // Stop any ongoing speech before starting a new one
+            const sanitizedQuestion = question.replace(/[*]/g, ''); // Remove asterisks
+            speechSynthesisUtterance = new SpeechSynthesisUtterance(sanitizedQuestion);
+            speechSynthesisUtterance.lang = 'en-US';
+            window.speechSynthesis.speak(speechSynthesisUtterance);
+        }
+
+        function startRecording() {
+            cancelSpeech(); // Stop any ongoing speech before starting recording
+            if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+                alert('Speech recognition not supported in this browser. Please use Chrome.');
+                return;
+            }
+
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.lang = 'en-US';
+            recognition.continuous = true;
+
+            recognition.onresult = (event) => {
+                let interimTranscript = '';  // Variable to hold ongoing speech
+
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    if (event.results[i].isFinal) {
+                        transcript += event.results[i][0].transcript + ' ';
+                    } else {
+                        interimTranscript = event.results[i][0].transcript;
+                    }
+                }
+
+                // Update live transcript in real-time as the user speaks
+                document.getElementById('transcript').textContent = transcript + interimTranscript;
+
+                // Enable "Next Question" button when there is an answer
+                if (transcript.trim() !== "") {
+                    toggleNextButton(true);
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.error('Speech recognition error:', event.error);
+            };
+
+            recognition.onend = () => {
+                if (isRecording) recognition.start(); // Continuously restart recognition on end if needed
+            };
+
+            recognition.start();
+            isRecording = true;
+
+            // Show the microphone icon when recording starts
+            document.getElementById('micIcon').style.display = 'block';
+        }
+
+        function stopRecording() {
+            cancelSpeech(); // Stop any ongoing speech before stopping recording
+            if (recognition) {
+                recognition.stop();
+                isRecording = false;
+
+                // Hide the microphone icon when recording stops
+                document.getElementById('micIcon').style.display = 'none';
+            }
+        }
+
+        function clearTranscript() {
+            transcript = ''; // Clear the transcript
+            document.getElementById('transcript').textContent = 'Live transcript will appear here...';
+        }
+
+        function toggleNextButton(enable) {
+            const nextButton = document.querySelector('button[onclick="nextQuestion()"]');
+            nextButton.disabled = !enable;
+            if (enable) {
+                nextButton.style.backgroundColor = '#28a745';  // Green for enabled
+            } else {
+                nextButton.style.backgroundColor = '#007bff';  // Blue for disabled
+            }
+        }
+
+
+        
+    async function finishInterview() {
+        cancelSpeech(); // Stop any ongoing speech
+        
+        const jobRole = sessionStorage.getItem('job_role') || "Unknown Role";
+        const company = sessionStorage.getItem('company') || "Unknown Company";
+        const emotion = "neutral";  // Placeholder for emotion analysis
+        const suspiciousCount = 0; // Placeholder for suspicious behavior tracking
+
+        const requestData = {
+            job_role: jobRole,
+            company: company,
+            questions: questions,
+            answers: answers,
+            emotion: emotion,
+            suspiciousCount: suspiciousCount
+        };
+        console.log('Request data:', requestData);
+        try {
+            const response = await fetch('http://127.0.0.1:5000/api/generate-review', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestData)
+            });
+
+            if (!response.ok) {
+                throw new Error(`Server error: ${response.status} - ${response.statusText}`);
+            }
+
+            const data = await response.json();
+            sessionStorage.setItem('interviewReview', data.review);
+            window.location.href = 'result.html'; // Redirect to results page
+
+        } catch (error) {
+            console.error("Error generating review:", error);
+            alert("Failed to generate review. Please try again.");
+        }
+    }
+
+
+
+        // Function to stop any ongoing speech synthesis
+        function cancelSpeech() {
+            if (window.speechSynthesis.speaking) {
+                window.speechSynthesis.cancel();
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="currentQuestion">Click the button to get questions!</div>
+    <div class="button-container">
+        <button onclick="getQuestions()">Get Questions</button>
+        <button onclick="nextQuestion()" disabled>Next Question</button> <!-- Start with the Next button disabled -->
+        <button onclick="startRecording()">Start Recording</button>
+        <button onclick="stopRecording()">Stop Recording</button>
+        <button onclick="finishInterview()">Finish Interview</button> <!-- Always enabled -->
+ <!-- Initially disabled -->
+    </div>
+    <div id="transcript">Live transcript will appear here...</div>
+    <!-- Microphone Icon -->
+    <div id="micIcon">&#x1F3A4;</div> <!-- This is the microphone emoji -->
+</body>
+</html>

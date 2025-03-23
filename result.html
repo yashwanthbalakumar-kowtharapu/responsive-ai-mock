@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interview Review</title>
+    <script>
+        window.onload = function () {
+            let reviewText = sessionStorage.getItem('interviewReview') || "No review available.";
+            
+            // Remove ** symbols
+            reviewText = reviewText.replace(/\*\*/g, "");
+
+            document.body.innerHTML = `
+                <h2 style="text-align: center; font-size: 24px;">AI Interview Review</h2>
+                <p style="white-space: pre-line; font-size: 18px; margin: 20px;">${reviewText}</p>
+            `;
+        };
+    </script>
+</head>
+<body>
+</body>
+</html>
+    
